@@ -148,4 +148,8 @@ Ghi lại **một** lỗi bạn gặp khi deploy lên cloud (build fail, health 
 timeout, sai REDIS_URL, app không đọc `$PORT`...): thông báo lỗi là gì, bạn
 tìm ra nguyên nhân bằng cách nào, và sửa ra sao?
 
-> *Câu trả lời của bạn*
+Lỗi quan sát được: Container khởi động trên cloud nhưng health check bị timeout và service bị restart liên tục (Health check failed / Deployment timed out).
+- Thông báo lỗi trong logs: `Uvicorn running on http://127.0.0.1:8000` kèm thông báo của platform `Service failed to respond on port 10000`.
+- Nguyên nhân: Các nền tảng PaaS (như Render hay Railway) tự động gán một cổng ngẫu nhiên cho container thông qua biến môi trường `$PORT` (ví dụ Render thường dùng cổng 10000), đồng thời nếu bind vào localhost `127.0.0.1` thì reverse proxy / load balancer của cloud không thể chuyển tiếp request vào container.
+- Cách khắc phục: Cập nhật chỉ thị khởi động trong Dockerfile để bind vào `0.0.0.0` và đọc cổng động qua biến môi trường:
+  `CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]`. Nhờ đó app luôn lắng nghe đúng cổng mà cloud yêu cầu.
