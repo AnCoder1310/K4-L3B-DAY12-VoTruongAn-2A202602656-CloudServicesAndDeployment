@@ -120,7 +120,13 @@ Hai tình huống cụ thể:
 Nếu gộp hai endpoint làm một và cho nó kiểm tra Redis, chuyện gì xảy ra với cụm
 3 container khi Redis mất kết nối 30 giây? Trả lời theo đúng thứ tự sự kiện.
 
-> *Câu trả lời của bạn*
+Thứ tự sự kiện diễn ra:
+1. Redis gặp sự cố mạng hoặc khởi động lại, tạm thời mất kết nối trong 30 giây.
+2. Endpoint `/health` (đóng vai trò liveness probe) do kiểm tra cả Redis nên không kết nối được và trả về HTTP 503.
+3. Orchestrator (Docker/Kubernetes/Cloud platform) thấy liveness probe thất bại liên tiếp liền kết luận cả 3 container agent đều đã chết (deadlock/unresponsive).
+4. Orchestrator đồng loạt phát lệnh tiêu diệt (kill) và restart lại toàn bộ 3 container cùng lúc.
+5. Cả 3 container bị cuốn vào vòng lặp restart (crash loop), hệ thống hoàn toàn sập và không thể tiếp nhận bất kỳ request nào (100% downtime).
+6. Khi Redis kết nối lại bình thường sau 30 giây, các container vẫn đang chật vật khởi động lại và tải lại ứng dụng, biến một sự cố chập chờn ngắn hạn của database ngoài thành thảm họa sập toàn bộ dịch vụ (cascading failure).
 
 ---
 
@@ -130,7 +136,9 @@ Chạy `docker compose up --scale agent=3` rồi gọi `/ask` nhiều lần vớ
 `X-User-Id`. Quan sát `history_length` trong response. Nếu lịch sử được lưu
 trong một dict Python thay vì Redis, bạn sẽ thấy con số đó thay đổi thế nào?
 
-> *Câu trả lời của bạn*
+Quan sát và so sánh:
+- Khi lưu trong Redis (chuẩn stateless): Tất cả các instance cùng chia sẻ một kho dữ liệu Redis tập trung. Vì vậy qua mỗi lần hỏi, `history_length` tăng đều đặn liên tục (0, 1, 2, 3...) dù request được Load Balancer điều phối vào bất kỳ container nào trong số 3 container.
+- Nếu lưu trong một dict Python (stateful trong RAM tiến trình): Mỗi container có vùng nhớ riêng biệt. Khi Load Balancer phân bổ request theo cơ chế round-robin qua các container khác nhau, `history_length` sẽ nhảy lộn xộn và không nhất quán (ví dụ lần lượt là 0, 0, 1, 0, 2, 1...). Hệ quả là agent sẽ bị hiện tượng "mất trí nhớ ngẫu nhiên", lúc nhớ ngữ cảnh câu trước, lúc hoàn toàn quên sạch phụ thuộc vào việc request rơi trúng container nào.
 
 ---
 
